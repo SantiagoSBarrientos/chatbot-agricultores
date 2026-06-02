@@ -1,4 +1,4 @@
-from flask import Flask, request
+from flask import Flask, request, send_from_directory
 from twilio.twiml.messaging_response import MessagingResponse
 from supabase import create_client
 import os
@@ -37,6 +37,10 @@ def validar(paso, valor):
         if not valor.replace("+","").replace(" ","").isdigit() or len(valor.replace("+","").replace(" ","")) < 7:
             return False, "⚠️ Por favor escriba un número de teléfono válido. Ejemplo: 3001234567"
     return True, ""
+
+@app.route("/panel")
+def panel():
+    return send_from_directory(".", "panel.html")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
