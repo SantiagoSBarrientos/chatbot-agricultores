@@ -42,24 +42,20 @@ def webhook():
         if paso > 0:
             campo = CAMPOS[paso - 1]
             estado["datos"][campo] = mensaje
+        msg.body(PREGUNTAS[paso])
+        estado["paso"] += 1
 
-        if paso < len(PREGUNTAS):
-            msg.body(PREGUNTAS[paso])
-            estado["paso"] += 1
-        
-    if estado["paso"] == len(PREGUNTAS) + 1 or (paso == len(PREGUNTAS) and paso > 0):
+    elif paso == len(PREGUNTAS):
         campo = CAMPOS[paso - 1]
         estado["datos"][campo] = mensaje
-        
         try:
             supabase.table("agricultores").insert(estado["datos"]).execute()
             msg.body("✅ ¡Gracias! Sus datos han sido registrados exitosamente. 🌱")
         except Exception as e:
             msg.body("❌ Hubo un error guardando sus datos. Por favor intente de nuevo.")
-        
         del conversaciones[numero]
 
     return str(resp)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
