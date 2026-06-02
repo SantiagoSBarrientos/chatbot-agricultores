@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Panel - Agricultores</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #f0f4f0; }
+        .header { background: #2d6a2d; color: white; padding: 20px; text-align: center; }
+        .header h1 { font-size: 24px; }
+        .header p { font-size: 14px; opacity: 0.8; margin-top: 5px; }
+        .login { max-width: 400px; margin: 80px auto; background: white; padding: 40px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .login h2 { text-align: center; color: #2d6a2d; margin-bottom: 20px; }
+        .login input { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 15px; }
+        .login button { width: 100%; padding: 12px; background: #2d6a2d; color: white; border: none; border-radius: 8px; font-size: 16px; cursor: pointer; }
+        .container { max-width: 1200px; margin: 20px auto; padding: 0 15px; }
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat { background: white; padding: 20px; border-radius: 12px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .stat h3 { font-size: 32px; color: #2d6a2d; }
+        .stat p { font-size: 13px; color: #666; margin-top: 5px; }
+        .toolbar { background: white; padding: 15px; border-radius: 12px; margin-bottom: 15px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .toolbar input, .toolbar select { padding: 8px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; flex: 1; min-width: 150px; }
+        .toolbar button { padding: 8px 16px; background: #2d6a2d; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; white-space: nowrap; }
+        .toolbar button.secondary { background: #4CAF50; }
+        table { width: 100%; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-collapse: collapse; }
+        th { background: #2d6a2d; color: white; padding: 12px 15px; text-align: left; font-size: 13px; }
+        td { padding: 12px 15px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+        tr:hover { background: #f9fff9; }
+        .badge { background: #e8f5e9; color: #2d6a2d; padding: 3px 8px; border-radius: 12px; font-size: 12px; }
+        .empty { text-align: center; padding: 40px; color: #999; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <h1>🌱 Registro de Agricultores</h1>
+    <p>Panel de administración</p>
+</div>
+
+<div id="loginDiv" class="login">
+    <h2>🔒 Acceder</h2>
+    <input type="password" id="password" placeholder="Contraseña" onkeypress="if(event.key==='Enter') login()">
+    <button onclick="login()">Entrar</button>
+    <p id="loginError" style="color:red; text-align:center; margin-top:10px; font-size:13px;"></p>
+</div>
+
+<div id="panelDiv" class="hidden">
+    <div class="container">
+        <div class="stats">
+            <div class="stat">
+                <h3 id="totalCount">0</h3>
+                <p>Total agricultores</p>
+            </div>
+            <div class="stat">
+                <h3 id="municipioCount">0</h3>
+                <p>Municipios</p>
+            </div>
+            <div class="stat">
+                <h3 id="cultivoCount">0</h3>
+                <p>Tipos de cultivo</p>
+            </div>
+            <div class="stat">
+                <h3 id="hectareasTotal">0</h3>
+                <p>Total hectáreas</p>
+            </div>
+        </div>
+
+        <div class="toolbar">
+            <input type="text" id="buscar" placeholder="🔍 Buscar por nombre..." oninput="filtrar()">
+            <select id="filtroMunicipio" onchange="filtrar()">
+                <option value="">Todos los municipios</option>
+            </select>
+            <select id="filtroCultivo" onchange="filtrar()">
+                <option value="">Todos los cultivos</option>
+            </select>
+            <button onclick="cargarDatos()">🔄 Actualizar</button>
+            <button class="secondary" onclick="exportarCSV()">📥 Exportar Excel</button>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Nombre</th>
+                    <th>Municipio</th>
+                    <th>Vereda</th>
+                    <th>Cultivo</th>
+                    <th>Hectáreas</th>
+                    <th>Teléfono</th>
+                </tr>
+            </thead>
+            <tbody id="tablaBody">
+                <tr><td colspan="7" class="empty">Cargando datos...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+const SUPABASE_URL = "https://zvnwpveozwhewrcwdneb.supabase.co";
+const SUPABASE_KEY = "sb_publishable_Xq0FRccZGmNagr8ppbFOSg_UeeXMt2k";
+const PASSWORD = "agricultores2024";
+
+let todosLosDatos = [];
+
+function login() {
+    const pass = document.getElementById("password").value;
+    if (pass === PASSWORD) {
+        document.getElementById("loginDiv").classList.add("hidden");
+        document.getElementById("panelDiv").classList.remove("hidden");
+        cargarDatos();
+    } else {
+        document.getElementById("loginError").textContent = "Contraseña incorrecta";
+    }
+}
+
+async function cargarDatos() {
+    try {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/agricultores?select=*&order=id.desc`, {
+            headers: {
+                "apikey": SUPABASE_KEY,
+                "Authorization": `Bearer ${SUPABASE_KEY}`
+            }
+        });
+        todosLosDatos = await res.json();
+        actualizarEstadisticas(todosLosDatos);
+        llenarFiltros(todosLosDatos);
+        renderTabla(todosLosDatos);
+    } catch(e) {
+        document.getElementById("tablaBody").innerHTML = '<tr><td colspan="7" class="empty">Error cargando datos</td></tr>';
+    }
+}
+
+function actualizarEstadisticas(datos) {
+    document.getElementById("totalCount").textContent = datos.length;
+    document.getElementById("municipioCount").textContent = [...new Set(datos.map(d => d.municipio))].length;
+    document.getElementById("cultivoCount").textContent = [...new Set(datos.map(d => d.cultivo))].length;
+    const total = datos.reduce((sum, d) => sum + (parseFloat(d.hectareas) || 0), 0);
+    document.getElementById("hectareasTotal").textContent = total.toFixed(1);
+}
+
+function llenarFiltros(datos) {
+    const municipios = [...new Set(datos.map(d => d.municipio).filter(Boolean))];
+    const cultivos = [...new Set(datos.map(d => d.cultivo).filter(Boolean))];
+    const selMun = document.getElementById("filtroMunicipio");
+    const selCul = document.getElementById("filtroCultivo");
+    selMun.innerHTML = '<option value="">Todos los municipios</option>' + municipios.map(m => `<option>${m}</option>`).join("");
+    selCul.innerHTML = '<option value="">Todos los cultivos</option>' + cultivos.map(c => `<option>${c}</option>`).join("");
+}
+
+function filtrar() {
+    const buscar = document.getElementById("buscar").value.toLowerCase();
+    const municipio = document.getElementById("filtroMunicipio").value;
+    const cultivo = document.getElementById("filtroCultivo").value;
+    const filtrados = todosLosDatos.filter(d => {
+        const coincideNombre = !buscar || (d.nombre || "").toLowerCase().includes(buscar);
+        const coincideMunicipio = !municipio || d.municipio === municipio;
+        const coincideCultivo = !cultivo || d.cultivo === cultivo;
+        return coincideNombre && coincideMunicipio && coincideCultivo;
+    });
+    renderTabla(filtrados);
+}
+
+function renderTabla(datos) {
+    if (datos.length === 0) {
+        document.getElementById("tablaBody").innerHTML = '<tr><td colspan="7" class="empty">No hay registros</td></tr>';
+        return;
+    }
+    document.getElementById("tablaBody").innerHTML = datos.map((d, i) => `
+        <tr>
+            <td>${i + 1}</td>
+            <td><b>${d.nombre || "-"}</b></td>
+            <td>${d.municipio || "-"}</td>
+            <td>${d.vereda || "-"}</td>
+            <td><span class="badge">${d.cultivo || "-"}</span></td>
+            <td>${d.hectareas || "-"} ha</td>
+            <td>${d.telefono || "-"}</td>
+        </tr>
+    `).join("");
+}
+
+function exportarCSV() {
+    const headers = ["Nombre", "Municipio", "Vereda", "Cultivo", "Hectáreas", "Teléfono"];
+    const rows = todosLosDatos.map(d => [d.nombre, d.municipio, d.vereda, d.cultivo, d.hectareas, d.telefono]);
+    const csv = [headers, ...rows].map(r => r.join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "agricultores.csv";
+    a.click();
+}
+</script>
+
+</body>
+</html>
