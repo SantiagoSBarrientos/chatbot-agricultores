@@ -1,4 +1,4 @@
-from flask import Flask, request, send_from_directory
+from flask import Flask, request, send_from_directory, Response
 import requests
 import os
 from supabase import create_client
@@ -22,7 +22,7 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 conversaciones = {}
 
 PREGUNTAS = [
-    "👋 ¡Hola! Bienvenido al registro de agricultores.\n\nEscriba *reiniciar* en cualquier momento para empezar de nuevo.\n\n¿Cuál es su nombre completo?",
+    "👋 ¡Hola! Bienvenido al registro de agricultores.\n\nEscriba reiniciar en cualquier momento para empezar de nuevo.\n\n¿Cuál es su nombre completo?",
     "¿En qué municipio vive?",
     "¿En qué barrio, vereda o corregimiento vive?",
     "¿Qué tipo de cultivo tiene? (ej: plátano, cacao, maíz...)",
@@ -31,6 +31,15 @@ PREGUNTAS = [
 ]
 
 CAMPOS = ["nombre", "municipio", "vereda", "cultivo", "hectareas", "telefono"]
+
+
+def twiml_response(texto):
+    texto_escaped = texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+    <Message>{texto_escaped}</Message>
+</Response>"""
+    return Response(xml, mimetype="text/xml")
 
 
 def enviar_mensaje_meta(numero, texto):
@@ -48,23 +57,6 @@ def enviar_mensaje_meta(numero, texto):
     requests.post(url, headers=headers, json=payload)
 
 
-def enviar_mensaje_twilio(numero, texto):
-    from twilio.rest import Client
-    client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
-    client.messages.create(
-        body=texto,
-        from_=f"whatsapp:{TWILIO_WHATSAPP_NUMBER}",
-        to=f"whatsapp:{numero}"
-    )
-
-
-def enviar_mensaje(numero, texto, via="meta"):
-    if via == "twilio":
-        enviar_mensaje_twilio(numero, texto)
-    else:
-        enviar_mensaje_meta(numero, texto)
-
-
 def validar(paso, valor):
     if len(valor) < 2:
         return False, "⚠️ La respuesta es muy corta. Por favor intente de nuevo."
@@ -79,8 +71,11 @@ def validar(paso, valor):
     return True, ""
 
 
-def procesar_mensaje(numero, mensaje, via="meta"):
-    if mensaje.lower() in ["reiniciar", "empezar", "inicio", "reset", "hola"]:
+def procesar_mensaje_twilio(numero, mensaje):
+    if mensaje.lower() in ["reiniciar", "empezar", "inicio", "reset", "hola", "join arrive-truth", "join sit-dish"]:
+        if mensaje.lower().startswith("join"):
+            conversaciones[numero] = {"paso": 0, "datos": {}}
+            return twiml_response(PREGUNTAS[0])
         conversaciones[numero] = {"paso": 0, "datos": {}}
 
     if numero not in conversaciones:
@@ -94,49 +89,49 @@ def procesar_mensaje(numero, mensaje, via="meta"):
             campo = CAMPOS[paso - 1]
             valido, error_msg = validar(paso - 1, mensaje)
             if not valido:
-                enviar_mensaje(numero, error_msg + "\n\n" + PREGUNTAS[paso - 1], via)
-                return
+                return twiml_response(error_msg + "\n\n" + PREGUNTAS[paso - 1])
             estado["datos"][campo] = mensaje
 
-        enviar_mensaje(numero, PREGUNTAS[paso], via)
+        respuesta = PREGUNTAS[paso]
         estado["paso"] += 1
+        return twiml_response(respuesta)
 
     elif paso == len(PREGUNTAS):
         campo = CAMPOS[paso - 1]
         valido, error_msg = validar(paso - 1, mensaje)
         if not valido:
-            enviar_mensaje(numero, error_msg + "\n\n" + PREGUNTAS[paso - 1], via)
-            return
+            return twiml_response(error_msg + "\n\n" + PREGUNTAS[paso - 1])
         estado["datos"][campo] = mensaje
 
         datos = estado["datos"]
         resumen = (
-            f"📋 *Resumen de su registro:*\n\n"
-            f"👤 Nombre: {datos.get('nombre')}\n"
-            f"🏘️ Municipio: {datos.get('municipio')}\n"
-            f"📍 Sector: {datos.get('vereda')}\n"
-            f"🌱 Cultivo: {datos.get('cultivo')}\n"
-            f"📐 Hectáreas: {datos.get('hectareas')}\n"
-            f"📱 Teléfono: {datos.get('telefono')}\n\n"
-            f"¿Los datos son correctos?\nEscriba *SI* para confirmar o *NO* para empezar de nuevo."
+            f"Resumen de su registro:\n\n"
+            f"Nombre: {datos.get('nombre')}\n"
+            f"Municipio: {datos.get('municipio')}\n"
+            f"Sector: {datos.get('vereda')}\n"
+            f"Cultivo: {datos.get('cultivo')}\n"
+            f"Hectareas: {datos.get('hectareas')}\n"
+            f"Telefono: {datos.get('telefono')}\n\n"
+            f"¿Los datos son correctos?\nEscriba SI para confirmar o NO para empezar de nuevo."
         )
-        enviar_mensaje(numero, resumen, via)
         estado["paso"] += 1
+        return twiml_response(resumen)
 
     elif paso == len(PREGUNTAS) + 1:
         if mensaje.upper() == "SI":
             try:
                 supabase.table("agricultores").insert(estado["datos"]).execute()
-                enviar_mensaje(numero, "✅ ¡Gracias! Sus datos han sido registrados exitosamente. 🌱\n\nEscriba *hola* si desea registrar otro agricultor.", via)
+                del conversaciones[numero]
+                return twiml_response("✅ ¡Gracias! Sus datos han sido registrados exitosamente.\n\nEscriba hola si desea registrar otro agricultor.")
             except Exception as e:
-                enviar_mensaje(numero, "❌ Hubo un error guardando sus datos. Por favor escriba *reiniciar* para intentar de nuevo.", via)
-            del conversaciones[numero]
+                return twiml_response("❌ Hubo un error guardando sus datos. Por favor escriba reiniciar para intentar de nuevo.")
         elif mensaje.upper() == "NO":
             conversaciones[numero] = {"paso": 1, "datos": {}}
-            enviar_mensaje(numero, PREGUNTAS[0], via)
-            conversaciones[numero]["paso"] = 1
+            return twiml_response(PREGUNTAS[0])
         else:
-            enviar_mensaje(numero, "Por favor escriba *SI* para confirmar o *NO* para empezar de nuevo.", via)
+            return twiml_response("Por favor escriba SI para confirmar o NO para empezar de nuevo.")
+
+    return twiml_response("Escriba hola para comenzar.")
 
 
 @app.route("/panel")
@@ -157,7 +152,6 @@ def verificar_webhook():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # Detectar si es Twilio (form data) o Meta (JSON)
     content_type = request.content_type or ""
 
     if "application/x-www-form-urlencoded" in content_type or request.form.get("Body"):
@@ -165,9 +159,8 @@ def webhook():
         mensaje = request.form.get("Body", "").strip()
         numero = request.form.get("From", "").replace("whatsapp:", "")
         if not mensaje or not numero:
-            return "ok", 200
-        procesar_mensaje(numero, mensaje, via="twilio")
-        return "ok", 200
+            return twiml_response("")
+        return procesar_mensaje_twilio(numero, mensaje)
 
     else:
         # Meta
@@ -190,7 +183,62 @@ def webhook():
         except (KeyError, IndexError):
             return "ok", 200
 
-        procesar_mensaje(numero, mensaje, via="meta")
+        if mensaje.lower() in ["reiniciar", "empezar", "inicio", "reset", "hola"]:
+            conversaciones[numero] = {"paso": 0, "datos": {}}
+
+        if numero not in conversaciones:
+            conversaciones[numero] = {"paso": 0, "datos": {}}
+
+        estado = conversaciones[numero]
+        paso = estado["paso"]
+
+        if paso < len(PREGUNTAS):
+            if paso > 0:
+                campo = CAMPOS[paso - 1]
+                valido, error_msg = validar(paso - 1, mensaje)
+                if not valido:
+                    enviar_mensaje_meta(numero, error_msg + "\n\n" + PREGUNTAS[paso - 1])
+                    return "ok", 200
+                estado["datos"][campo] = mensaje
+            enviar_mensaje_meta(numero, PREGUNTAS[paso])
+            estado["paso"] += 1
+
+        elif paso == len(PREGUNTAS):
+            campo = CAMPOS[paso - 1]
+            valido, error_msg = validar(paso - 1, mensaje)
+            if not valido:
+                enviar_mensaje_meta(numero, error_msg + "\n\n" + PREGUNTAS[paso - 1])
+                return "ok", 200
+            estado["datos"][campo] = mensaje
+            datos = estado["datos"]
+            resumen = (
+                f"📋 Resumen de su registro:\n\n"
+                f"👤 Nombre: {datos.get('nombre')}\n"
+                f"🏘️ Municipio: {datos.get('municipio')}\n"
+                f"📍 Sector: {datos.get('vereda')}\n"
+                f"🌱 Cultivo: {datos.get('cultivo')}\n"
+                f"📐 Hectáreas: {datos.get('hectareas')}\n"
+                f"📱 Teléfono: {datos.get('telefono')}\n\n"
+                f"¿Los datos son correctos?\nEscriba SI para confirmar o NO para empezar de nuevo."
+            )
+            enviar_mensaje_meta(numero, resumen)
+            estado["paso"] += 1
+
+        elif paso == len(PREGUNTAS) + 1:
+            if mensaje.upper() == "SI":
+                try:
+                    supabase.table("agricultores").insert(estado["datos"]).execute()
+                    enviar_mensaje_meta(numero, "✅ ¡Gracias! Sus datos han sido registrados exitosamente. 🌱\n\nEscriba hola si desea registrar otro agricultor.")
+                except Exception as e:
+                    enviar_mensaje_meta(numero, "❌ Hubo un error guardando sus datos. Por favor escriba reiniciar para intentar de nuevo.")
+                del conversaciones[numero]
+            elif mensaje.upper() == "NO":
+                conversaciones[numero] = {"paso": 1, "datos": {}}
+                enviar_mensaje_meta(numero, PREGUNTAS[0])
+                conversaciones[numero]["paso"] = 1
+            else:
+                enviar_mensaje_meta(numero, "Por favor escriba SI para confirmar o NO para empezar de nuevo.")
+
         return "ok", 200
 
 
