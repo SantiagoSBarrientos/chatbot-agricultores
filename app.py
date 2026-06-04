@@ -58,16 +58,21 @@ def enviar_mensaje_meta(numero, texto):
 
 
 def validar(paso, valor):
-    if len(valor) < 2:
-        return False, "⚠️ La respuesta es muy corta. Por favor intente de nuevo."
+    # Hectareas (paso 4): solo validar que sea numero, sin minimo de caracteres
     if paso == 4:
         try:
-            float(valor)
+            float(valor.replace(",", "."))
         except:
             return False, "⚠️ Por favor escriba solo el número de hectáreas. Ejemplo: 2.5"
+        return True, ""
+    # Telefono (paso 5): validar que sea numero valido
     if paso == 5:
         if not valor.replace("+", "").replace(" ", "").isdigit() or len(valor.replace("+", "").replace(" ", "")) < 7:
             return False, "⚠️ Por favor escriba un número de teléfono válido. Ejemplo: 3001234567"
+        return True, ""
+    # Otros campos: minimo 2 caracteres
+    if len(valor) < 2:
+        return False, "⚠️ La respuesta es muy corta. Por favor intente de nuevo."
     return True, ""
 
 
