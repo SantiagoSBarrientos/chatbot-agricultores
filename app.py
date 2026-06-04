@@ -77,6 +77,7 @@ def validar(paso, valor):
 
 
 def procesar_mensaje_twilio(numero, mensaje):
+    print(f"TWILIO - numero: {numero}, mensaje: {mensaje}", flush=True)
     if mensaje.lower() in ["reiniciar", "empezar", "inicio", "reset", "hola", "join arrive-truth", "join sit-dish"]:
         if mensaje.lower().startswith("join"):
             conversaciones[numero] = {"paso": 0, "datos": {}}
