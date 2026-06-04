@@ -13,6 +13,9 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_WHATSAPP_NUMBER = os.getenv("TWILIO_WHATSAPP_NUMBER")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
@@ -30,7 +33,7 @@ PREGUNTAS = [
 CAMPOS = ["nombre", "municipio", "vereda", "cultivo", "hectareas", "telefono"]
 
 
-def enviar_mensaje(numero, texto):
+def enviar_mensaje_meta(numero, texto):
     url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         "Authorization": f"Bearer {WHATSAPP_TOKEN}",
@@ -45,6 +48,23 @@ def enviar_mensaje(numero, texto):
     requests.post(url, headers=headers, json=payload)
 
 
+def enviar_mensaje_twilio(numero, texto):
+    from twilio.rest import Client
+    client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+    client.messages.create(
+        body=texto,
+        from_=f"whatsapp:{TWILIO_WHATSAPP_NUMBER}",
+        to=f"whatsapp:{numero}"
+    )
+
+
+def enviar_mensaje(numero, texto, via="meta"):
+    if via == "twilio":
+        enviar_mensaje_twilio(numero, texto)
+    else:
+        enviar_mensaje_meta(numero, texto)
+
+
 def validar(paso, valor):
     if len(valor) < 2:
         return False, "⚠️ La respuesta es muy corta. Por favor intente de nuevo."
@@ -57,6 +77,66 @@ def validar(paso, valor):
         if not valor.replace("+", "").replace(" ", "").isdigit() or len(valor.replace("+", "").replace(" ", "")) < 7:
             return False, "⚠️ Por favor escriba un número de teléfono válido. Ejemplo: 3001234567"
     return True, ""
+
+
+def procesar_mensaje(numero, mensaje, via="meta"):
+    if mensaje.lower() in ["reiniciar", "empezar", "inicio", "reset", "hola"]:
+        conversaciones[numero] = {"paso": 0, "datos": {}}
+
+    if numero not in conversaciones:
+        conversaciones[numero] = {"paso": 0, "datos": {}}
+
+    estado = conversaciones[numero]
+    paso = estado["paso"]
+
+    if paso < len(PREGUNTAS):
+        if paso > 0:
+            campo = CAMPOS[paso - 1]
+            valido, error_msg = validar(paso - 1, mensaje)
+            if not valido:
+                enviar_mensaje(numero, error_msg + "\n\n" + PREGUNTAS[paso - 1], via)
+                return
+            estado["datos"][campo] = mensaje
+
+        enviar_mensaje(numero, PREGUNTAS[paso], via)
+        estado["paso"] += 1
+
+    elif paso == len(PREGUNTAS):
+        campo = CAMPOS[paso - 1]
+        valido, error_msg = validar(paso - 1, mensaje)
+        if not valido:
+            enviar_mensaje(numero, error_msg + "\n\n" + PREGUNTAS[paso - 1], via)
+            return
+        estado["datos"][campo] = mensaje
+
+        datos = estado["datos"]
+        resumen = (
+            f"📋 *Resumen de su registro:*\n\n"
+            f"👤 Nombre: {datos.get('nombre')}\n"
+            f"🏘️ Municipio: {datos.get('municipio')}\n"
+            f"📍 Sector: {datos.get('vereda')}\n"
+            f"🌱 Cultivo: {datos.get('cultivo')}\n"
+            f"📐 Hectáreas: {datos.get('hectareas')}\n"
+            f"📱 Teléfono: {datos.get('telefono')}\n\n"
+            f"¿Los datos son correctos?\nEscriba *SI* para confirmar o *NO* para empezar de nuevo."
+        )
+        enviar_mensaje(numero, resumen, via)
+        estado["paso"] += 1
+
+    elif paso == len(PREGUNTAS) + 1:
+        if mensaje.upper() == "SI":
+            try:
+                supabase.table("agricultores").insert(estado["datos"]).execute()
+                enviar_mensaje(numero, "✅ ¡Gracias! Sus datos han sido registrados exitosamente. 🌱\n\nEscriba *hola* si desea registrar otro agricultor.", via)
+            except Exception as e:
+                enviar_mensaje(numero, "❌ Hubo un error guardando sus datos. Por favor escriba *reiniciar* para intentar de nuevo.", via)
+            del conversaciones[numero]
+        elif mensaje.upper() == "NO":
+            conversaciones[numero] = {"paso": 1, "datos": {}}
+            enviar_mensaje(numero, PREGUNTAS[0], via)
+            conversaciones[numero]["paso"] = 1
+        else:
+            enviar_mensaje(numero, "Por favor escriba *SI* para confirmar o *NO* para empezar de nuevo.", via)
 
 
 @app.route("/panel")
@@ -77,85 +157,41 @@ def verificar_webhook():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json(force=True, silent=True)
+    # Detectar si es Twilio (form data) o Meta (JSON)
+    content_type = request.content_type or ""
 
-    if not data:
+    if "application/x-www-form-urlencoded" in content_type or request.form.get("Body"):
+        # Twilio
+        mensaje = request.form.get("Body", "").strip()
+        numero = request.form.get("From", "").replace("whatsapp:", "")
+        if not mensaje or not numero:
+            return "ok", 200
+        procesar_mensaje(numero, mensaje, via="twilio")
         return "ok", 200
 
-    try:
-        entry = data["entry"][0]
-        changes = entry["changes"][0]
-        value = changes["value"]
-
-        if "messages" not in value:
+    else:
+        # Meta
+        data = request.get_json(force=True, silent=True)
+        if not data:
             return "ok", 200
 
-        message = value["messages"][0]
-        numero = message["from"]
-        mensaje = message["text"]["body"].strip()
+        try:
+            entry = data["entry"][0]
+            changes = entry["changes"][0]
+            value = changes["value"]
 
-    except (KeyError, IndexError):
-        return "ok", 200
-
-    if mensaje.lower() in ["reiniciar", "empezar", "inicio", "reset", "hola"]:
-        conversaciones[numero] = {"paso": 0, "datos": {}}
-
-    if numero not in conversaciones:
-        conversaciones[numero] = {"paso": 0, "datos": {}}
-
-    estado = conversaciones[numero]
-    paso = estado["paso"]
-
-    if paso < len(PREGUNTAS):
-        if paso > 0:
-            campo = CAMPOS[paso - 1]
-            valido, error_msg = validar(paso - 1, mensaje)
-            if not valido:
-                enviar_mensaje(numero, error_msg + "\n\n" + PREGUNTAS[paso - 1])
+            if "messages" not in value:
                 return "ok", 200
-            estado["datos"][campo] = mensaje
 
-        enviar_mensaje(numero, PREGUNTAS[paso])
-        estado["paso"] += 1
+            message = value["messages"][0]
+            numero = message["from"]
+            mensaje = message["text"]["body"].strip()
 
-    elif paso == len(PREGUNTAS):
-        campo = CAMPOS[paso - 1]
-        valido, error_msg = validar(paso - 1, mensaje)
-        if not valido:
-            enviar_mensaje(numero, error_msg + "\n\n" + PREGUNTAS[paso - 1])
+        except (KeyError, IndexError):
             return "ok", 200
-        estado["datos"][campo] = mensaje
 
-        datos = estado["datos"]
-        resumen = (
-            f"📋 *Resumen de su registro:*\n\n"
-            f"👤 Nombre: {datos.get('nombre')}\n"
-            f"🏘️ Municipio: {datos.get('municipio')}\n"
-            f"📍 Sector: {datos.get('vereda')}\n"
-            f"🌱 Cultivo: {datos.get('cultivo')}\n"
-            f"📐 Hectáreas: {datos.get('hectareas')}\n"
-            f"📱 Teléfono: {datos.get('telefono')}\n\n"
-            f"¿Los datos son correctos?\nEscriba *SI* para confirmar o *NO* para empezar de nuevo."
-        )
-        enviar_mensaje(numero, resumen)
-        estado["paso"] += 1
-
-    elif paso == len(PREGUNTAS) + 1:
-        if mensaje.upper() == "SI":
-            try:
-                supabase.table("agricultores").insert(estado["datos"]).execute()
-                enviar_mensaje(numero, "✅ ¡Gracias! Sus datos han sido registrados exitosamente. 🌱\n\nEscriba *hola* si desea registrar otro agricultor.")
-            except Exception as e:
-                enviar_mensaje(numero, "❌ Hubo un error guardando sus datos. Por favor escriba *reiniciar* para intentar de nuevo.")
-            del conversaciones[numero]
-        elif mensaje.upper() == "NO":
-            conversaciones[numero] = {"paso": 1, "datos": {}}
-            enviar_mensaje(numero, PREGUNTAS[0])
-            conversaciones[numero]["paso"] = 1
-        else:
-            enviar_mensaje(numero, "Por favor escriba *SI* para confirmar o *NO* para empezar de nuevo.")
-
-    return "ok", 200
+        procesar_mensaje(numero, mensaje, via="meta")
+        return "ok", 200
 
 
 if __name__ == "__main__":
