@@ -77,7 +77,10 @@ def verificar_webhook():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json()
+    data = request.get_json(force=True, silent=True)
+
+    if not data:
+        return "ok", 200
 
     try:
         entry = data["entry"][0]
