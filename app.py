@@ -102,7 +102,6 @@ def procesar_mensaje(numero, mensaje):
     estado = conversaciones[numero]
     paso = estado["paso"]
 
-    # Flujo de preguntas
     if paso < len(PREGUNTAS):
         if paso > 0:
             campo = CAMPOS[paso - 1]
@@ -114,14 +113,12 @@ def procesar_mensaje(numero, mensaje):
         respuesta = PREGUNTAS[paso]
         estado["paso"] += 1
 
-        # Progreso visual
         if paso > 0:
             progreso = f"_Pregunta {paso} de {len(PREGUNTAS) - 1} ✓_\n\n"
             respuesta = progreso + respuesta
 
         return respuesta
 
-    # Ultima pregunta
     elif paso == len(PREGUNTAS):
         campo = CAMPOS[paso - 1]
         valido, error_msg = validar(paso - 1, mensaje)
@@ -131,7 +128,6 @@ def procesar_mensaje(numero, mensaje):
         estado["paso"] += 1
         return construir_resumen(estado["datos"])
 
-    # Confirmacion
     elif paso == len(PREGUNTAS) + 1:
         if mensaje.upper() == "SI":
             try:
@@ -249,6 +245,11 @@ def webhook_meta():
 @app.route("/panel")
 def panel():
     return send_from_directory(".", "panel.html")
+
+
+@app.route("/privacy")
+def privacy():
+    return send_from_directory(".", "privacy.html")
 
 
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
