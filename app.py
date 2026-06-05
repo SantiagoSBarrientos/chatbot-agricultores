@@ -92,8 +92,6 @@ def procesar_mensaje(numero, mensaje):
 
     if es_reinicio(mensaje):
         conversaciones[numero] = {"paso": 0, "datos": {}}
-        if mensaje.lower().startswith("join"):
-            return PREGUNTAS[0]
         return PREGUNTAS[0]
 
     if numero not in conversaciones:
@@ -164,21 +162,67 @@ def twiml(texto):
     )
 
 
-@app.route("/webhook/twilio", methods=["POST"])
-def webhook_twilio():
-    mensaje = request.form.get("Body", "").strip()
-    numero = request.form.get("From", "").replace("whatsapp:", "")
+# ─── WEBHOOK UNIFICADO ────────────────────────────────────────────────────────
 
-    print(f"[TWILIO] De: {numero} | Msg: {mensaje}", flush=True)
-
-    if not mensaje or not numero:
-        return twiml("")
-
-    respuesta = procesar_mensaje(numero, mensaje)
-    return twiml(respuesta)
+@app.route("/webhook", methods=["GET"])
+def verificar_webhook():
+    mode = request.args.get("hub.mode")
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return challenge, 200
+    return "Token invalido", 403
 
 
-# ─── META CLOUD API ───────────────────────────────────────────────────────────
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    # Detectar si viene de Twilio (form data) o Meta (JSON)
+    if request.form.get("Body") is not None:
+        # TWILIO
+        mensaje = request.form.get("Body", "").strip()
+        numero = request.form.get("From", "").replace("whatsapp:", "")
+
+        print(f"[TWILIO] De: {numero} | Msg: {mensaje}", flush=True)
+
+        if not mensaje or not numero:
+            return twiml("")
+
+        respuesta = procesar_mensaje(numero, mensaje)
+        return twiml(respuesta)
+
+    else:
+        # META CLOUD API
+        try:
+            data = request.json
+            entry = data.get("entry", [{}])[0]
+            changes = entry.get("changes", [{}])[0]
+            value = changes.get("value", {})
+            messages = value.get("messages", [])
+
+            if not messages:
+                return "OK", 200
+
+            msg = messages[0]
+            numero = msg.get("from")
+            tipo = msg.get("type")
+
+            if tipo == "text":
+                mensaje = msg["text"]["body"].strip()
+            elif tipo == "interactive":
+                mensaje = msg["interactive"].get("button_reply", {}).get("title", "")
+            else:
+                enviar_meta(numero, "🌱 Por favor envía un mensaje de texto para continuar tu registro.")
+                return "OK", 200
+
+            print(f"[META] De: {numero} | Msg: {mensaje}", flush=True)
+            respuesta = procesar_mensaje(numero, mensaje)
+            enviar_meta(numero, respuesta)
+
+        except Exception as e:
+            print(f"[META] Error: {e}", flush=True)
+
+        return "OK", 200
+
 
 def enviar_meta(numero, texto):
     url = f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages"
@@ -194,50 +238,6 @@ def enviar_meta(numero, texto):
     }
     resp = http_requests.post(url, headers=headers, json=payload)
     print(f"[META] Enviado a {numero} | Status: {resp.status_code}", flush=True)
-
-
-@app.route("/webhook", methods=["GET"])
-def verificar_webhook():
-    mode = request.args.get("hub.mode")
-    token = request.args.get("hub.verify_token")
-    challenge = request.args.get("hub.challenge")
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        return challenge, 200
-    return "Token invalido", 403
-
-
-@app.route("/webhook", methods=["POST"])
-def webhook_meta():
-    try:
-        data = request.json
-        entry = data.get("entry", [{}])[0]
-        changes = entry.get("changes", [{}])[0]
-        value = changes.get("value", {})
-        messages = value.get("messages", [])
-
-        if not messages:
-            return "OK", 200
-
-        msg = messages[0]
-        numero = msg.get("from")
-        tipo = msg.get("type")
-
-        if tipo == "text":
-            mensaje = msg["text"]["body"].strip()
-        elif tipo == "interactive":
-            mensaje = msg["interactive"].get("button_reply", {}).get("title", "")
-        else:
-            enviar_meta(numero, "🌱 Por favor envía un mensaje de texto para continuar tu registro.")
-            return "OK", 200
-
-        print(f"[META] De: {numero} | Msg: {mensaje}", flush=True)
-        respuesta = procesar_mensaje(numero, mensaje)
-        enviar_meta(numero, respuesta)
-
-    except Exception as e:
-        print(f"[META] Error: {e}", flush=True)
-
-    return "OK", 200
 
 
 # ─── PANEL ────────────────────────────────────────────────────────────────────
