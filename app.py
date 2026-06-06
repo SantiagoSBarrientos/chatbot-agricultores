@@ -184,6 +184,16 @@ def procesar_mensaje(numero, mensaje):
 
     # ── Paso 5: guardar asociación
     elif paso == 5:
+        # Si estaba esperando nombre libre (eligió Otros)
+        if estado.get("esperando_otro"):
+            valido, error = validar_texto(mensaje)
+            if not valido:
+                return error + "\n\n✏️ Escribe el nombre de tu asociación:"
+            estado["datos"]["asociacion"] = mensaje
+            estado["esperando_otro"] = False
+            estado["paso"] = 6
+            return "_Pregunta 6 de 7 ✓_\n\n" + PREGUNTAS[4]  # pedir teléfono
+
         # Si viene de botón interactivo ya trae el título directamente
         if mensaje in ASOCIACIONES:
             seleccion = mensaje
@@ -213,16 +223,6 @@ def procesar_mensaje(numero, mensaje):
 
     # ── Paso 6: guardar teléfono, mostrar resumen
     elif paso == 6:
-        # Si estaba esperando nombre libre de asociación
-        if estado.get("esperando_otro"):
-            valido, error = validar_texto(mensaje)
-            if not valido:
-                return error + "\n\n✏️ Escribe el nombre de tu asociación:"
-            estado["datos"]["asociacion"] = mensaje
-            estado["esperando_otro"] = False
-            estado["paso"] = 6
-            return "_Pregunta 6 de 7 ✓_\n\n" + PREGUNTAS[4]  # pedir teléfono
-
         valido, error = validar_telefono(mensaje)
         if not valido:
             return error + "\n\n" + PREGUNTAS[4]
