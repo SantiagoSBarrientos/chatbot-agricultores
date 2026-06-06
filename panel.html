@@ -113,7 +113,7 @@ function login() {
 async function cargarDatos() {
     document.getElementById("tablaBody").innerHTML = '<tr><td colspan="8" class="empty">Cargando...</td></tr>';
     try {
-        const res = await fetch(`${SUPABASE_URL}/rest/v1/agricultores?select=*&order=id.asc`, {
+        const res = await fetch(`${SUPABASE_URL}/rest/v1/agricultores?select=*`, {
             headers: {
                 "apikey": SUPABASE_KEY,
                 "Authorization": `Bearer ${SUPABASE_KEY}`
