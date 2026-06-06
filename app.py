@@ -21,21 +21,40 @@ conversaciones = {}
 BIENVENIDA = (
     "🌱 *¡Bienvenido al Sistema de Registro de Agricultores de Urabá!* 🌿\n\n"
     "Hola! Soy tu asistente virtual y voy a ayudarte a registrarte en nuestra base de datos.\n\n"
-    "📋 Solo necesito hacerte *6 preguntas rápidas* y listo!\n\n"
+    "📋 Solo necesito hacerte *7 preguntas rápidas* y listo!\n\n"
     "💡 _En cualquier momento escribe *REINICIAR* para empezar de nuevo._\n\n"
     "✏️ Empecemos... ¿Cuál es tu *nombre completo*?"
 )
 
+ASOCIACIONES = [
+    "Asocpraur",
+    "Asociación de Urabá",
+    "Aprocesu",
+    "Asociación Abibe",
+    "Cooperativa Proasiv",
+    "Otros",
+]
+
+# Pasos:
+# 0 → mostrar bienvenida y pedir nombre
+# 1 → guardar nombre, pedir municipio
+# 2 → guardar municipio, pedir vereda
+# 3 → guardar vereda, pedir cultivo
+# 4 → guardar cultivo, pedir hectáreas
+# 5 → guardar hectáreas, pedir asociación (botones)
+# 6 → guardar asociación (o pedir nombre si eligió Otros), pedir teléfono
+# 7 → guardar teléfono, mostrar resumen
+# 8 → confirmar SI/NO
+
+CAMPOS = ["nombre", "municipio", "vereda", "cultivo", "hectareas", "asociacion", "telefono"]
+
 PREGUNTAS = [
-    BIENVENIDA,
     "🏘️ ¿En qué *municipio* vives?\n\n_(Ej: Apartadó, Turbo, Carepa, Chigorodó...)_",
     "📍 ¿En qué *barrio, vereda o corregimiento* vives?\n\n_(Ej: Vereda La Esperanza, Barrio El Centro...)_",
     "🌾 ¿Qué tipo de *cultivo* tienes?\n\n_(Ej: plátano 🍌, cacao 🍫, maíz 🌽, yuca...)_",
     "📐 ¿Cuántas *hectáreas* tienes?\n\n_(Solo el número, ej: 2.5)_",
-    "📱 ¿Cuál es tu *número de teléfono*?\n\n_(Solo números, ej: 3001234567)_"
+    "📱 ¿Cuál es tu *número de teléfono*?\n\n_(Solo números, ej: 3001234567)_",
 ]
-
-CAMPOS = ["nombre", "municipio", "vereda", "cultivo", "hectareas", "telefono"]
 
 EMOJIS_CAMPO = {
     "nombre": "👤",
@@ -43,24 +62,29 @@ EMOJIS_CAMPO = {
     "vereda": "📍",
     "cultivo": "🌾",
     "hectareas": "📐",
-    "telefono": "📱"
+    "asociacion": "🤝",
+    "telefono": "📱",
 }
 
 
 # ─── UTILIDADES ───────────────────────────────────────────────────────────────
 
-def validar(paso, valor):
-    if paso == 4:
-        try:
-            float(valor.replace(",", "."))
-        except:
-            return False, "⚠️ *Hectáreas inválidas*\n\nPor favor escribe solo el número.\n_Ejemplo: 2.5_"
+def validar_hectareas(valor):
+    try:
+        float(valor.replace(",", "."))
         return True, ""
-    if paso == 5:
-        digits = valor.replace("+", "").replace(" ", "").replace("-", "")
-        if not digits.isdigit() or len(digits) < 7:
-            return False, "⚠️ *Teléfono inválido*\n\nPor favor escribe solo los números.\n_Ejemplo: 3001234567_"
-        return True, ""
+    except:
+        return False, "⚠️ *Hectáreas inválidas*\n\nPor favor escribe solo el número.\n_Ejemplo: 2.5_"
+
+
+def validar_telefono(valor):
+    digits = valor.replace("+", "").replace(" ", "").replace("-", "")
+    if not digits.isdigit() or len(digits) < 7:
+        return False, "⚠️ *Teléfono inválido*\n\nPor favor escribe solo los números.\n_Ejemplo: 3001234567_"
+    return True, ""
+
+
+def validar_texto(valor):
     if len(valor.strip()) < 2:
         return False, "⚠️ *Respuesta muy corta*\n\nPor favor intenta de nuevo con más detalle."
     return True, ""
@@ -82,7 +106,19 @@ def construir_resumen(datos):
 
 
 def es_reinicio(msg):
-    return msg.lower() in ["reiniciar", "empezar", "inicio", "reset", "hola", "hi", "buenas", "buenos dias", "buenas tardes", "buenas noches"] or msg.lower().startswith("join")
+    return msg.lower() in [
+        "reiniciar", "empezar", "inicio", "reset", "hola", "hi",
+        "buenas", "buenos dias", "buenas tardes", "buenas noches"
+    ] or msg.lower().startswith("join")
+
+
+def texto_asociaciones():
+    opciones = "\n".join([f"{i+1}. {a}" for i, a in enumerate(ASOCIACIONES)])
+    return (
+        "🤝 ¿A qué *asociación* perteneces?\n\n"
+        f"{opciones}\n\n"
+        "_Responde con el número de tu opción_"
+    )
 
 
 # ─── LÓGICA PRINCIPAL ─────────────────────────────────────────────────────────
@@ -91,42 +127,111 @@ def procesar_mensaje(numero, mensaje):
     mensaje = mensaje.strip()
 
     if es_reinicio(mensaje):
-        conversaciones[numero] = {"paso": 0, "datos": {}}
-        return PREGUNTAS[0]
+        conversaciones[numero] = {"paso": 0, "datos": {}, "esperando_otro": False}
+        return BIENVENIDA
 
     if numero not in conversaciones:
-        conversaciones[numero] = {"paso": 0, "datos": {}}
+        conversaciones[numero] = {"paso": 0, "datos": {}, "esperando_otro": False}
+        return BIENVENIDA
 
     estado = conversaciones[numero]
     paso = estado["paso"]
 
-    if paso < len(PREGUNTAS):
-        if paso > 0:
-            campo = CAMPOS[paso - 1]
-            valido, error_msg = validar(paso - 1, mensaje)
-            if not valido:
-                return error_msg + "\n\n" + PREGUNTAS[paso - 1]
-            estado["datos"][campo] = mensaje.strip()
-
-        respuesta = PREGUNTAS[paso]
-        estado["paso"] += 1
-
-        if paso > 0:
-            progreso = f"_Pregunta {paso} de {len(PREGUNTAS) - 1} ✓_\n\n"
-            respuesta = progreso + respuesta
-
-        return respuesta
-
-    elif paso == len(PREGUNTAS):
-        campo = CAMPOS[paso - 1]
-        valido, error_msg = validar(paso - 1, mensaje)
+    # ── Paso 0: usuario acaba de recibir bienvenida, responde con su nombre
+    if paso == 0:
+        valido, error = validar_texto(mensaje)
         if not valido:
-            return error_msg + "\n\n" + PREGUNTAS[paso - 1]
-        estado["datos"][campo] = mensaje.strip()
-        estado["paso"] += 1
-        return construir_resumen(estado["datos"])
+            return error + "\n\n✏️ ¿Cuál es tu *nombre completo*?"
+        estado["datos"]["nombre"] = mensaje
+        estado["paso"] = 1
+        return "_Pregunta 1 de 7 ✓_\n\n" + PREGUNTAS[0]  # pedir municipio
 
-    elif paso == len(PREGUNTAS) + 1:
+    # ── Paso 1: guardar municipio, pedir vereda
+    elif paso == 1:
+        valido, error = validar_texto(mensaje)
+        if not valido:
+            return error + "\n\n" + PREGUNTAS[0]
+        estado["datos"]["municipio"] = mensaje
+        estado["paso"] = 2
+        return "_Pregunta 2 de 7 ✓_\n\n" + PREGUNTAS[1]
+
+    # ── Paso 2: guardar vereda, pedir cultivo
+    elif paso == 2:
+        valido, error = validar_texto(mensaje)
+        if not valido:
+            return error + "\n\n" + PREGUNTAS[1]
+        estado["datos"]["vereda"] = mensaje
+        estado["paso"] = 3
+        return "_Pregunta 3 de 7 ✓_\n\n" + PREGUNTAS[2]
+
+    # ── Paso 3: guardar cultivo, pedir hectáreas
+    elif paso == 3:
+        valido, error = validar_texto(mensaje)
+        if not valido:
+            return error + "\n\n" + PREGUNTAS[2]
+        estado["datos"]["cultivo"] = mensaje
+        estado["paso"] = 4
+        return "_Pregunta 4 de 7 ✓_\n\n" + PREGUNTAS[3]
+
+    # ── Paso 4: guardar hectáreas, pedir asociación
+    elif paso == 4:
+        valido, error = validar_hectareas(mensaje)
+        if not valido:
+            return error + "\n\n" + PREGUNTAS[3]
+        estado["datos"]["hectareas"] = mensaje
+        estado["paso"] = 5
+        return "_Pregunta 5 de 7 ✓_\n\n" + texto_asociaciones()
+
+    # ── Paso 5: guardar asociación
+    elif paso == 5:
+        # Si viene de botón interactivo ya trae el título directamente
+        if mensaje in ASOCIACIONES:
+            seleccion = mensaje
+        else:
+            # Intentar por número
+            try:
+                idx = int(mensaje) - 1
+                if 0 <= idx < len(ASOCIACIONES):
+                    seleccion = ASOCIACIONES[idx]
+                else:
+                    return "⚠️ Opción inválida.\n\n" + texto_asociaciones()
+            except:
+                return "⚠️ Por favor responde con el *número* de tu opción.\n\n" + texto_asociaciones()
+
+        if seleccion == "Otros":
+            estado["esperando_otro"] = True
+            estado["paso"] = 5  # quedarse en mismo paso
+            return "✏️ Escribe el nombre de tu asociación:"
+        else:
+            estado["datos"]["asociacion"] = seleccion
+            estado["esperando_otro"] = False
+            estado["paso"] = 6
+            return "_Pregunta 6 de 7 ✓_\n\n" + PREGUNTAS[4]  # pedir teléfono
+
+    # ── Paso 5 con esperando_otro: guardar nombre libre de asociación
+    # (se maneja arriba, pero por si acaso esperando_otro está activo)
+
+    # ── Paso 6: guardar teléfono, mostrar resumen
+    elif paso == 6:
+        # Si estaba esperando nombre libre de asociación
+        if estado.get("esperando_otro"):
+            valido, error = validar_texto(mensaje)
+            if not valido:
+                return error + "\n\n✏️ Escribe el nombre de tu asociación:"
+            estado["datos"]["asociacion"] = mensaje
+            estado["esperando_otro"] = False
+            estado["paso"] = 6
+            return "_Pregunta 6 de 7 ✓_\n\n" + PREGUNTAS[4]  # pedir teléfono
+
+        valido, error = validar_telefono(mensaje)
+        if not valido:
+            return error + "\n\n" + PREGUNTAS[4]
+        estado["datos"]["telefono"] = mensaje
+        estado["paso"] = 7
+        return "_Pregunta 7 de 7 ✓_\n\n" + construir_resumen(estado["datos"])
+
+    # ── Paso 7: confirmación SI/NO
+    elif paso == 7:
         if mensaje.upper() == "SI":
             try:
                 supabase.table("agricultores").insert(estado["datos"]).execute()
@@ -144,8 +249,8 @@ def procesar_mensaje(numero, mensaje):
                     "Hubo un problema técnico. Por favor escribe *REINICIAR* para intentar de nuevo."
                 )
         elif mensaje.upper() == "NO":
-            conversaciones[numero] = {"paso": 1, "datos": {}}
-            return "🔄 *Empecemos de nuevo*\n\n" + PREGUNTAS[0]
+            conversaciones[numero] = {"paso": 0, "datos": {}, "esperando_otro": False}
+            return "🔄 *Empecemos de nuevo*\n\n" + BIENVENIDA
         else:
             return "❓ Por favor escribe *SI* para confirmar o *NO* para empezar de nuevo."
 
@@ -176,17 +281,13 @@ def verificar_webhook():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # Detectar si viene de Twilio (form data) o Meta (JSON)
     if request.form.get("Body") is not None:
         # TWILIO
         mensaje = request.form.get("Body", "").strip()
         numero = request.form.get("From", "").replace("whatsapp:", "")
-
         print(f"[TWILIO] De: {numero} | Msg: {mensaje}", flush=True)
-
         if not mensaje or not numero:
             return twiml("")
-
         respuesta = procesar_mensaje(numero, mensaje)
         return twiml(respuesta)
 
@@ -210,6 +311,8 @@ def webhook():
                 mensaje = msg["text"]["body"].strip()
             elif tipo == "interactive":
                 mensaje = msg["interactive"].get("button_reply", {}).get("title", "")
+                if not mensaje:
+                    mensaje = msg["interactive"].get("list_reply", {}).get("title", "")
             else:
                 enviar_meta(numero, "🌱 Por favor envía un mensaje de texto para continuar tu registro.")
                 return "OK", 200
